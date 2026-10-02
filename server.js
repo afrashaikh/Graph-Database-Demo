@@ -1,24 +1,24 @@
-require('dotenv').config();
-const express = require('express');
+require('dotenv').config(); //loads my Neo4j login
+const express = require('express'); //starts an express server
 const cors = require('cors');
 const neo4j = require('neo4j-driver');
 const { randomUUID } = require('crypto');
 
-const driver = neo4j.driver(
-  process.env.NEO4J_URI,
-  neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD)
+const driver = neo4j.driver( //creates a driver, the connection object
+  process.env.NEO4J_URI, //takes address 
+  neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD) //takes username and password
 );
 const app = express();
 app.use(cors(), express.json());
 
 const run = async (query, params = {}) => {
-  const session = driver.session({ database: process.env.NEO4J_DATABASE });
+  const session = driver.session({ database: process.env.NEO4J_DATABASE }); //then creates a new session in the database for each query
   try { return (await session.run(query, params)).records; }
   finally { await session.close(); }
 };
 const num = v => (neo4j.isInt(v) ? v.toNumber() : v);
 
-// All notes + links (the frontend draws this)
+//all notes and links 
 app.get('/api/graph', async (_, res) => {
   const n = await run(`MATCH (n:Note)
     RETURN n.id AS id, n.title AS title, n.body AS body, COUNT { (n)--() } AS degree`);
@@ -30,7 +30,7 @@ app.get('/api/graph', async (_, res) => {
   });
 });
 
-// Create a note
+//creates a note
 app.post('/api/notes', async (req, res) => {
   const { title, body = '' } = req.body;
   const id = randomUUID();
@@ -38,7 +38,7 @@ app.post('/api/notes', async (req, res) => {
   res.json({ id, title, body });
 });
 
-// Link two notes
+//links two notes
 app.post('/api/links', async (req, res) => {
   const { from, to, weight = 3 } = req.body;
   await run(`MATCH (a:Note {id:$from}), (b:Note {id:$to})
@@ -46,7 +46,7 @@ app.post('/api/links', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Shortest path between two notes (returns ordered note ids)
+//shortest path between two notes
 app.get('/api/path', async (req, res) => {
   const { from, to } = req.query;
   const r = await run(`MATCH (a:Note {id:$from}), (b:Note {id:$to}),
@@ -55,7 +55,7 @@ app.get('/api/path', async (req, res) => {
   res.json(r.length ? { ids: r[0].get('ids'), titles: r[0].get('titles') } : { ids: [], titles: [] });
 });
 
-// Similar notes (Jaccard on shared neighbors)
+//similar notes matching
 app.get('/api/similar/:id', async (req, res) => {
   const r = await run(`MATCH (a:Note {id:$id})-[:LINKS_TO]-(x)-[:LINKS_TO]-(b:Note) WHERE b <> a
     WITH a, b, count(DISTINCT x) AS shared
@@ -66,7 +66,7 @@ app.get('/api/similar/:id', async (req, res) => {
   res.json(r.map(x => ({ id: x.get('id'), title: x.get('title'), score: x.get('score') })));
 });
 
-// Search: find a start note, then return its linked notes as context
+//searching: find a start note, then return its linked notes as context
 app.get('/api/search', async (req, res) => {
   const r = await run(`MATCH (n:Note)
     WHERE toLower(n.title) CONTAINS toLower($q) OR toLower(n.body) CONTAINS toLower($q)
@@ -81,7 +81,9 @@ app.get('/api/search', async (req, res) => {
   });
 });
 
-// Load sample data once: POST /api/seed
+//loads sample data once
+//POST /api/seed
+//test
 app.post('/api/seed', async (_, res) => {
   await run(`
     CREATE (a:Note {id:'1', title:'Neo4j Basics', body:'Graph database of nodes and relationships'})
