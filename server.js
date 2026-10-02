@@ -88,9 +88,9 @@ app.post('/api/seed', async (_, res) => {
   await run(`
     CREATE (a:Note {id:'1', title:'Neo4j Basics', body:'Graph database of nodes and relationships'})
     CREATE (b:Note {id:'2', title:'Cypher', body:'Query language for graphs'})
-    CREATE (c:Note {id:'3', title:'GraphRAG', body:'Vector search plus graph traversal for LLMs'})
+    CREATE (c:Note {id:'3', title:'GraphRAG', body:'Vector search plus graph traversal'})
     CREATE (d:Note {id:'4', title:'PostgreSQL', body:'Relational store for users and sessions'})
-    CREATE (e:Note {id:'5', title:'S3 Audio Files', body:'Audio and image objects in AWS S3'})
+    CREATE (e:Note {id:'5', title:'S3 Audio Files', body:'Audio and image objects'})
     CREATE (a)-[:LINKS_TO {weight:5}]->(b)
     CREATE (a)-[:LINKS_TO {weight:4}]->(c)
     CREATE (b)-[:LINKS_TO {weight:3}]->(c)
