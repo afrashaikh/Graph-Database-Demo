@@ -209,7 +209,7 @@ export default function App() {
             className="input-field"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Try: 'SQL data', 'audio files'..."
+            placeholder="Search. . ."
           />
           <button type="submit" className="btn btn-primary">Semantic Search</button>
         </form>
