@@ -24,7 +24,7 @@ Express + Neo4j API with React graph frontend.
 4. Open `http://localhost:5173` in browser.
 
 ## Features 
--Force Graph Canvas using react-force-graph-2d
--Node and link management 
--Visual neighbor focus
--Semantic Search using Transformers.js and cosine similarity
+- Force Graph Canvas using react-force-graph-2d
+- Node and link management 
+- Visual neighbor focus
+- Semantic Search using Transformers.js and cosine similarity
