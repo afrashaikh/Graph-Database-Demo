@@ -1,0 +1,131 @@
+.app-container {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 340px;
+  min-width: 340px;
+  padding: 20px;
+  background-color: #0f172a;
+  border-right: 1px solid #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.sidebar-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.status-badge {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  word-break: break-word;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid #334155;
+  margin: 4px 0;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.input-field {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background-color: #1e293b;
+  color: #f8fafc;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-field:focus {
+  border-color: #3b82f6;
+}
+
+.textarea-field {
+  resize: none;
+}
+
+.btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.btn-primary {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+.btn-success {
+  background-color: #10b981;
+  color: #ffffff;
+}
+
+.btn-secondary {
+  background-color: #334155;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+}
+
+.node-card {
+  background-color: #1e293b;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid #3b82f6;
+}
+
+.node-card-title {
+  margin: 0 0 6px 0;
+  color: #60a5fa;
+  font-size: 1rem;
+}
+
+.node-card-body {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.node-card-meta {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+/* Canvas Container */
+.canvas-container {
+  flex: 1;
+  position: relative;
+  height: 100%;
+}
