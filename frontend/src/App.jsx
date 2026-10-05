@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
+import { embedText, cosineSimilarity } from './embedding';
 import './App.css';
 
 export default function App() {
@@ -13,6 +14,10 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [status, setStatus] = useState('Loading graph...');
 
+  // vector embedding state
+  const [embeddings, setEmbeddings] = useState({});
+  const [rankedResults, setRankedResults] = useState([]);
+
   // add note form state
   const [newTitle, setNewTitle] = useState('');
   const [newBody, setNewBody] = useState('');
@@ -23,7 +28,7 @@ export default function App() {
   const [linkTargetNodeId, setLinkTargetNodeId] = useState('');
   const [linkWeight, setLinkWeight] = useState(3);
 
-  // pulls graph topology
+  // pulls graph topology and embeds nodes
   const fetchGraph = async () => {
     try {
       setStatus('Fetching graph data...');
@@ -32,9 +37,25 @@ export default function App() {
       const data = await res.json();
       
       setGraphData(data);
-      setStatus(`Loaded ${data.nodes.length} nodes, ${data.links.length} edges`);
+      setStatus('Indexing embeddings...');
+      await indexNodeVectors(data.nodes);
     } catch (err) {
       setStatus(`Error loading graph: ${err.message}`);
+    }
+  };
+
+  // calculates vector embeddings for all nodes
+  const indexNodeVectors = async (nodes) => {
+    try {
+      const vectorMap = {};
+      for (const node of nodes) {
+        const textToEmbed = `${node.title}: ${node.body || ''}`;
+        vectorMap[node.id] = await embedText(textToEmbed);
+      }
+      setEmbeddings(vectorMap);
+      setStatus(`Ready (${nodes.length} nodes embedded)`);
+    } catch (err) {
+      setStatus(`Embedding indexing error: ${err.message}`);
     }
   };
 
@@ -86,56 +107,68 @@ export default function App() {
 
   // connect existing nodes
   const handleConnectExisting = async (e) => {
-  e.preventDefault();
-  if (!linkSourceNodeId || !linkTargetNodeId || linkSourceNodeId === linkTargetNodeId) return;
+    e.preventDefault();
+    if (!linkSourceNodeId || !linkTargetNodeId || linkSourceNodeId === linkTargetNodeId) return;
 
-  try {
-    setStatus('Creating relationship between nodes...');
-    const res = await fetch('/api/links', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: linkSourceNodeId,
-        to: linkTargetNodeId,
-        weight: Number(linkWeight) || 3,
-      }),
-    });
-    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    try {
+      setStatus('Creating relationship between nodes...');
+      const res = await fetch('/api/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: linkSourceNodeId,
+          to: linkTargetNodeId,
+          weight: Number(linkWeight) || 3,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
 
-    setLinkSourceNodeId('');
-    setLinkTargetNodeId('');
-    setStatus('Successfully linked notes!');
-    await fetchGraph();
-  } catch (err) {
-    setStatus(`Failed to link nodes: ${err.message}`);
-  }
-};
+      setLinkSourceNodeId('');
+      setLinkTargetNodeId('');
+      setStatus('Successfully linked notes!');
+      await fetchGraph();
+    } catch (err) {
+      setStatus(`Failed to link nodes: ${err.message}`);
+    }
+  };
 
-  // search function
+  // semantic search using cosine similarity
   const handleSearch = async (e) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
+    const query = searchQuery.trim();
+    if (!query) return;
 
-    setStatus(`Searching for "${searchQuery}"...`);
+    if (Object.keys(embeddings).length === 0) {
+      setStatus('Embeddings still generating, please wait...');
+      return;
+    }
+
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-      const match = await res.json();
+      setStatus(`Searching for "${query}"...`);
+      const queryVec = await embedText(query);
 
-      if (match && match.id) {
+      // rank nodes by similarity
+      const scored = graphData.nodes.map(n => ({
+        ...n,
+        similarity: cosineSimilarity(queryVec, embeddings[n.id] || [])
+      }));
 
-        // find node in existing graph
-        const found = graphData.nodes.find(n => n.id === match.id);
-        if (found) {
-          setActiveNode(found);
-          setStatus(`Found node: ${found.title}`);
-          // put screen on matched node
-          if (fgRef.current && found.x !== undefined) {
-            fgRef.current.centerAt(found.x, found.y, 800);
-            fgRef.current.zoom(2.5, 800);
-          }
+      scored.sort((a, b) => b.similarity - a.similarity);
+      setRankedResults(scored);
+
+      const best = scored[0];
+      if (best && best.similarity > 0.15) {
+        setActiveNode(best);
+        setStatus(`Best match: "${best.title}" (${(best.similarity * 100).toFixed(1)}%)`);
+
+        // put screen on matched node
+        if (fgRef.current && best.x !== undefined) {
+          fgRef.current.centerAt(best.x, best.y, 800);
+          fgRef.current.zoom(2.5, 800);
         }
       } else {
-        setStatus('No matching notes found.');
+        setActiveNode(null);
+        setStatus(`No relevant match found for "${query}".`);
       }
     } catch (err) {
       setStatus(`Search failed: ${err.message}`);
@@ -164,7 +197,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* --- sidebar --- */}
+      {/* sidebar */}
       <aside className="sidebar">
         <h2 className="sidebar-title">Graph Explorer</h2>
         <div className="status-badge">Status: {status}</div>
@@ -176,13 +209,42 @@ export default function App() {
             className="input-field"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search notes..."
+            placeholder="Search. . ."
           />
-          <button type="submit" className="btn btn-primary">Search</button>
+          <button type="submit" className="btn btn-primary">Semantic Search</button>
         </form>
 
         {/* refresh */}
         <button onClick={fetchGraph} className="btn btn-secondary">Refresh Graph</button>
+
+        {/* top semantic matches */}
+        {rankedResults.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 600 }}>TOP MATCHES:</span>
+            {rankedResults.slice(0, 3).map(hit => (
+              <div
+                key={hit.id}
+                onClick={() => {
+                  setActiveNode(hit);
+                  if (fgRef.current && hit.x !== undefined) fgRef.current.centerAt(hit.x, hit.y, 600);
+                }}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  background: activeNode?.id === hit.id ? '#1e3a8a' : '#1e293b',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  border: '1px solid #334155'
+                }}
+              >
+                <span>{hit.title}</span>
+                <span style={{ color: '#38bdf8' }}>{(hit.similarity * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <hr className="divider" />
 
