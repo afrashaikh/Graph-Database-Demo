@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { embedText, cosineSimilarity } from './embeddings';
+import { embedText, cosineSimilarity } from './embedding';
 import './App.css';
 
 export default function App() {
