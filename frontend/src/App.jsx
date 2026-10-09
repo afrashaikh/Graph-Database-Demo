@@ -12,6 +12,7 @@ export default function App() {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [activeNode, setActiveNode] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [backend, setBackend] = useState("neo4j");
   const [status, setStatus] = useState('Loading graph...');
 
   // vector embedding state
@@ -28,11 +29,12 @@ export default function App() {
   const [linkTargetNodeId, setLinkTargetNodeId] = useState('');
   const [linkWeight, setLinkWeight] = useState(3);
 
-  // pulls graph topology and embeds nodes
+  // pulls graph topology and embeds nodes depending on active backend
   const fetchGraph = async () => {
     try {
-      setStatus('Fetching graph data...');
-      const res = await fetch('/api/graph');
+      setStatus(`Fetching graph from ${backend === 'arango' ? 'ArangoDB' : 'Neo4j'}...`);
+      const url = backend === 'arango' ? '/api/arango/graph' : '/api/graph';
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const data = await res.json();
       
@@ -59,10 +61,10 @@ export default function App() {
     }
   };
 
-  // load graph
+  // reload graph whenever active backend changes
   useEffect(() => {
     fetchGraph();
-  }, []);
+  }, [backend]);
 
 
   // FORM HANDLERS
@@ -76,8 +78,8 @@ export default function App() {
     try {
       setStatus('Creating node...');
       
-      // create note title and body
-      const res = await fetch('/api/notes', {
+      const noteUrl = backend === 'arango' ? '/api/arango/notes' : '/api/notes';
+      const res = await fetch(noteUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newTitle, body: newBody }),
@@ -87,7 +89,8 @@ export default function App() {
       // create edge if prompted to link
       if (linkTargetId) {
         setStatus('Linking note...');
-        await fetch('/api/links', {
+        const linkUrl = backend === 'arango' ? '/api/arango/links' : '/api/links';
+        await fetch(linkUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: created.id, to: linkTargetId, weight: 3 }),
@@ -112,7 +115,8 @@ export default function App() {
 
     try {
       setStatus('Creating relationship between nodes...');
-      const res = await fetch('/api/links', {
+      const linkUrl = backend === 'arango' ? '/api/arango/links' : '/api/links';
+      const res = await fetch(linkUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,6 +205,19 @@ export default function App() {
       <aside className="sidebar">
         <h2 className="sidebar-title">Graph Explorer</h2>
         <div className="status-badge">Status: {status}</div>
+
+        {/* DATABASE BACKEND SWITCHER */}
+        <div className="form-group" style={{ marginBottom: '12px' }}>
+          <span className="form-label" style={{ fontWeight: 600, color: '#38bdf8' }}>Active Database</span>
+          <select
+            className="input-field"
+            value={backend}
+            onChange={(e) => setBackend(e.target.value)}
+          >
+            <option value="neo4j">Neo4j (Cypher)</option>
+            <option value="arango">ArangoDB (AQL)</option>
+          </select>
+        </div>
 
         {/* node search */}
         <form onSubmit={handleSearch} className="form-group">
