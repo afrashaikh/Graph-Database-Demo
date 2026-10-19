@@ -41,9 +41,17 @@ const app = express();
 app.use(cors(), express.json());
 
 const run = async (query, params = {}) => {
-  const session = driver.session({ database: process.env.NEO4J_DATABASE }); //then creates a new session in the database for each query
-  try { return (await session.run(query, params)).records; }
-  finally { await session.close(); }
+  try {
+    const session = driver.session({ database: process.env.NEO4J_DATABASE });
+    try {
+      return (await session.run(query, params)).records;
+    } finally {
+      await session.close();
+    }
+  } catch (err) {
+    console.error('Neo4j Query Error:', err.message);
+    throw err;
+  }
 };
 const num = v => (neo4j.isInt(v) ? v.toNumber() : v);
 
