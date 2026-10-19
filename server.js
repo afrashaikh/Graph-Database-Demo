@@ -204,7 +204,13 @@ app.get('/api/arango/graph', async (_, res) => {
     `);
     const linksCursor = await arangoDb.query(aql`
       FOR l IN links
-        RETURN { source: PARSE_IDENTIFIER(l._from).key, target: PARSE_IDENTIFIER(l._to).key, weight: l.weight }
+        RETURN { 
+          source: PARSE_IDENTIFIER(l._from).key, 
+          target: PARSE_IDENTIFIER(l._to).key, 
+          weight: l.weight,
+          type: l.type || 'RELATES_TO',
+          description: l.description || ''
+        }
     `);
     const [nodes, links] = await Promise.all([nodesCursor.all(), linksCursor.all()]);
     res.json({ nodes, links });
@@ -228,7 +234,7 @@ app.post('/api/arango/notes', async (req, res) => {
 
 // note linking
 app.post('/api/arango/links', async (req, res) => {
-  const { from, to, weight = 3 } = req.body;
+  const { from, to, weight = 3, type = 'RELATES_TO', description = '' } = req.body;
   try {
     const edgeColl = arangoDb.collection('links');
     const existing = await arangoDb.query(aql`
@@ -238,14 +244,23 @@ app.post('/api/arango/links', async (req, res) => {
         RETURN l
     `);
     const match = await existing.next();
+    
+    const edgeData = {
+      _from: `notes/${from}`,
+      _to: `notes/${to}`,
+      weight: Number(weight) || 3,
+      type: type.trim().toUpperCase(),
+      description: description.trim(),
+    };
+
     if (match) {
-      await edgeColl.update(match._key, { weight });
-    } else {
-      await edgeColl.save({
-        _from: `notes/${from}`,
-        _to: `notes/${to}`,
-        weight: Number(weight),
+      await edgeColl.update(match._key, {
+        weight: edgeData.weight,
+        type: edgeData.type,
+        description: edgeData.description,
       });
+    } else {
+      await edgeColl.save(edgeData);
     }
     res.json({ ok: true });
   } catch (err) {
