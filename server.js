@@ -338,6 +338,139 @@ app.get('/api/arango/search', async (req, res) => {
   }
 });
 
+// HYBRID GRAPHRAG!!!!
+// executes hybrid search (Vector + Lexical) -> subgraph expansion (Edges & Neighbors)
+app.post('/api/arango/graphrag', async (req, res) => {
+  const { query = '', queryVec = [], maxAnchors = 2, maxHops = 1 } = req.body;
+
+  try {
+    const cursor = await arangoDb.query(aql`
+      LET queryVec = ${queryVec}
+      LET queryText = LOWER(${query})
+      LET qLen = LENGTH(queryVec)
+
+      // Hybrid Retrieval to find top anchor nodes
+      LET scoredAnchors = (
+        FOR doc IN notes
+          // Vector Cosine Similarity
+          LET hasEmbedding = IS_ARRAY(doc.embedding) AND LENGTH(doc.embedding) == qLen AND qLen > 0
+          LET dotProduct = hasEmbedding ? SUM(FOR i IN 0..(qLen - 1) RETURN doc.embedding[i] * queryVec[i]) : 0
+          LET magDoc = hasEmbedding ? SQRT(SUM(FOR i IN 0..(qLen - 1) RETURN doc.embedding[i] * doc.embedding[i])) : 0
+          LET magQuery = hasEmbedding ? SQRT(SUM(FOR i IN 0..(qLen - 1) RETURN queryVec[i] * queryVec[i])) : 0
+          LET rawCosine = (hasEmbedding AND magDoc > 0 AND magQuery > 0)
+            ? (dotProduct / (magDoc * magQuery))
+            : 0
+          LET vectorScore = (rawCosine + 1) / 2
+
+          // Lexical Keyword Matching
+          LET titleMatch = CONTAINS(LOWER(doc.title), queryText) ? 1.0 : 0.0
+          LET bodyMatch = CONTAINS(LOWER(doc.body || ''), queryText) ? 0.5 : 0.0
+          LET lexicalScore = MAX([titleMatch, bodyMatch])
+
+          // Centrality Authority Boost
+          LET degree = LENGTH(FOR v IN 1..1 ANY doc links RETURN 1)
+          LET degreeBoost = LOG(1 + degree) * 0.05
+
+          LET hybridScore = (vectorScore * 0.75) + (lexicalScore * 0.15) + degreeBoost
+
+          SORT hybridScore DESC
+          LIMIT ${maxAnchors}
+          RETURN {
+            node: doc,
+            hybridScore: hybridScore,
+            vectorScore: vectorScore,
+            lexicalScore: lexicalScore
+          }
+      )
+
+      // Knowledge Graph Subgraph Expansion
+      LET expandedContext = (
+        FOR anchor IN scoredAnchors
+          LET startNode = anchor.node
+          LET neighbors = (
+            FOR v, e IN 1..${maxHops} ANY startNode links
+              RETURN {
+                targetId: v._key,
+                targetTitle: v.title,
+                targetBody: v.body,
+                relationType: e.type || 'RELATES_TO',
+                relationDescription: e.description || '',
+                weight: e.weight || 1
+              }
+          )
+          RETURN {
+            anchorId: startNode._key,
+            anchorTitle: startNode.title,
+            anchorBody: startNode.body,
+            scores: {
+              hybrid: anchor.hybridScore,
+              vector: anchor.vectorScore,
+              lexical: anchor.lexicalScore
+            },
+            relationships: neighbors
+          }
+      )
+
+      RETURN expandedContext
+    `);
+
+    const contextData = await cursor.next();
+
+    // format into LLM-ready context assembly
+    const contextAssembly = (contextData || []).map((entry, idx) => {
+      const relLines = entry.relationships.map(
+        r => `   ↳ [${r.relationType}] -> "${r.targetTitle}" (${r.relationDescription || 'Connected note'})`
+      );
+      return [
+        `[Document ${idx + 1}] Title: ${entry.anchorTitle}`,
+        `Content: ${entry.anchorBody}`,
+        relLines.length > 0 ? `Graph Relationships:\n${relLines.join('\n')}` : `Graph Relationships: None`,
+      ].join('\n');
+    }).join('\n\n---\n\n');
+
+    const prompt = `You are a knowledge graph assistant. The relationships define how two entities are related and are not entites themselves. Use ONLY the provided Graph Context to answer the question concisely and accurately in a succint manner. You do not need to explain the process of finding the answer. If the context does not contain the answer or you are unsure, say "I don't have enough information." Always write in human sentences. Do not explain the graph context or the reasoning process unless asked why. If multiple answers exist, include a reasonable amount of them as long as it is accurate. If the answer is not in the context, do not hallucinate.
+
+    Graph Context:
+    ${contextAssembly}
+
+    Question: ${query}
+    Answer:`;
+
+    let generatedAnswer = '';
+
+    try {
+      const ollamaRes = await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3.2:1b',
+          prompt: prompt,
+          stream: false,
+        }),
+      });
+
+      if (ollamaRes.ok) {
+        const ollamaData = await ollamaRes.json();
+        generatedAnswer = ollamaData.response.trim();
+      } else {
+        generatedAnswer = 'Failed to generate answer from local LLM.';
+      }
+    } catch (llmErr) {
+      console.warn('Ollama unreachable, returning raw context instead:', llmErr.message);
+      generatedAnswer = 'Local LLM offline. Run Ollama on port 11434 to enable text generation.';
+    }
+
+    res.json({
+      answer: generatedAnswer || 'No answer generated yet.',
+      anchors: contextData,
+      formattedContext: contextAssembly
+    });
+  } catch (err) {
+    console.error('GraphRAG Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // seed arangoDB
 app.post('/api/arango/seed', async (_, res) => {
   try {

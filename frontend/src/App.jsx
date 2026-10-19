@@ -11,6 +11,9 @@ export default function App() {
   // graph state
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [activeNode, setActiveNode] = useState(null);
+  const [sourceNode, setSourceNode] = useState(null);
+  const [targetNode, setTargetNode] = useState(null);
+  const [activeLink, setActiveLink] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [backend, setBackend] = useState("arango");
   const [status, setStatus] = useState('Loading graph...');
@@ -33,6 +36,10 @@ export default function App() {
   const [linkTargetNodeId, setLinkTargetNodeId] = useState('');
   const [linkWeight, setLinkWeight] = useState(3);
   
+  // GraphRAG resutls
+  const [graphRagContext, setGraphRagContext] = useState('');
+  const [graphRagAnchors, setGraphRagAnchors] = useState([]);
+  const [graphRagAnswer, setGraphRagAnswer] = useState('');
 
   // pulls graph topology and embeds nodes depending on active backend
   const fetchGraph = async () => {
@@ -164,7 +171,7 @@ export default function App() {
       let scored = [];
 
       if (backend === 'arango') {
-        // --- ARANGODB: Hybrid Search (Vector + Lexical + Centrality) ---
+        // ARANGODB: Hybrid Search (Vector + Lexical + Centrality)
         const res = await fetch('/api/arango/semantic-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -173,7 +180,7 @@ export default function App() {
         if (!res.ok) throw new Error(`Search failed: ${res.statusText}`);
         const hits = await res.json();
 
-        // Preserve canvas coordinates (x, y) so ForceGraph zoom & highlight work
+        // preserve canvas coordinates (x, y) so ForceGraph zoom & highlight work
         scored = hits.map(hit => {
           const matchedGraphNode = graphData.nodes.find(n => n.id === hit.id);
           return {
@@ -183,7 +190,7 @@ export default function App() {
           };
         });
       } else {
-        // --- NEO4J FALLBACK: Client-side cosine similarity ---
+        //  NEO4J: Client-side cosine similarity 
         if (Object.keys(embeddings).length === 0) {
           setStatus('Embeddings still generating, please wait...');
           return;
@@ -197,6 +204,7 @@ export default function App() {
       }
 
       setRankedResults(scored);
+      
 
       const best = scored[0];
       if (best && best.similarity > 0.15) {
@@ -205,7 +213,7 @@ export default function App() {
           `Best match (${backend === 'arango' ? 'Hybrid' : 'Cosine'}): "${best.title}" (${(best.similarity * 100).toFixed(1)}%)`
         );
 
-        // Pan and center camera on best match
+        // pan and center camera on best match
         if (fgRef.current && best.x !== undefined && best.y !== undefined) {
           fgRef.current.centerAt(best.x, best.y, 800);
           fgRef.current.zoom(2.5, 800);
@@ -216,6 +224,44 @@ export default function App() {
       }
     } catch (err) {
       setStatus(`Search failed: ${err.message}`);
+    }
+  };
+
+  // HYBRID GRAPHRAG
+  const handleGraphRagSearch = async (e) => {
+    e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
+
+    try {
+      setStatus(`Executing Hybrid GraphRAG for "${query}"...`);
+      const queryVec = await embedText(query);
+
+      const res = await fetch('/api/arango/graphrag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, queryVec, maxAnchors: 2, maxHops: 1 }),
+      });
+
+      if (!res.ok) throw new Error(`GraphRAG failed: ${res.statusText}`);
+      const data = await res.json();
+
+      setGraphRagAnchors(data.anchors);
+      setGraphRagContext(data.formattedContext);
+      setGraphRagAnswer(data.answer); 
+
+      // focus graph camera on the primary anchor node
+      if (data.anchors.length > 0) {
+        const topAnchor = graphData.nodes.find(n => n.id === data.anchors[0].anchorId);
+        if (topAnchor && fgRef.current) {
+          setActiveNode(topAnchor);
+          fgRef.current.centerAt(topAnchor.x, topAnchor.y, 800);
+          fgRef.current.zoom(2.5, 800);
+        }
+      }
+      setStatus(`GraphRAG retrieved ${data.anchors.length} anchor context clusters.`);
+    } catch (err) {
+      setStatus(`GraphRAG error: ${err.message}`);
     }
   };
 
@@ -238,6 +284,9 @@ export default function App() {
 
     return set;
   }, [activeNode, graphData.links]);
+
+
+  // RENDERING
 
   return (
     <div className="app-container">
@@ -270,6 +319,35 @@ export default function App() {
           />
           <button type="submit" className="btn btn-primary">Semantic Search</button>
         </form>
+
+        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <button 
+            type="button" 
+            onClick={handleGraphRagSearch} 
+            className="btn btn-success" 
+            style={{ flex: 1 }}
+          >
+            GraphRAG Search
+          </button>
+        </div>
+
+        {/* GraphRAG answer */}
+        {graphRagAnswer && (
+          <div style={{
+            marginTop: '12px',
+            padding: '10px',
+            backgroundColor: '#0f172a',
+            borderRadius: '6px',
+            border: '1px solid #10b981'
+          }}>
+            <span style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 600 }}>
+              Answer:
+            </span>
+            <p style={{ fontSize: '0.85rem', color: '#f8fafc', marginTop: '6px', lineHeight: 1.4 }}>
+              {graphRagAnswer}
+            </p>
+          </div>
+        )}
 
         {/* refresh */}
         <button onClick={fetchGraph} className="btn btn-secondary">Refresh Graph</button>
@@ -324,16 +402,6 @@ export default function App() {
             rows={2}
           />
           {/* populates dropdown w/ existing nodes */}
-          <select
-            className="input-field"
-            value={linkTargetId}
-            onChange={(e) => setLinkTargetId(e.target.value)}
-          >
-            <option value="">Link to existing note (optional)...</option>
-            {graphData.nodes.map(n => (
-              <option key={n.id} value={n.id}>{n.title}</option>
-            ))}
-          </select>
           <button type="submit" className="btn btn-success">+ Create Note</button>
         </form>
 
@@ -408,8 +476,25 @@ export default function App() {
             <p className="node-card-body">{activeNode.body || 'No description provided.'}</p>
             <div className="node-card-meta">Connected Links: {activeNode.degree}</div>
           </div>
-        )}
+        )} 
+
+        {/* details selected link */}
+        {activeLink && (
+          <div className="link-card"> 
+          {activeLink && ( 
+            <div className="link-card-content"> 
+              <h4 className="link-card-title">Link Details</h4>
+              <p className="link-card-body">Type: {activeLink.type || 'RELATES_TO'}</p>
+              <p className="link-card-body">Weight: {activeLink.weight || 3}</p>
+              <p className="link-card-body">Description: {activeLink.description || 'No description provided.'}</p>
+            </div>
+          )}
+          </div>
+          )}  
+
       </aside>
+
+
 
       {/* canvas */}
       <main className="canvas-container">
@@ -417,19 +502,40 @@ export default function App() {
           ref={fgRef}
           graphData={graphData}
           nodeId="id"
+          LinkId="id"
           // displays tooltip upon node hover
           nodeLabel={node => `${node.title} (${node.degree} links)`}
           nodeColor={node => {
             if (activeNode?.id === node.id) return '#ef4444'; // color means selected
             if (neighborIds.has(node.id)) return '#f59e0b'; // color means neighbor
+            if (sourceNode?.id === node.id) return '#000000'; // color means source node
+            if (targetNode?.id === node.id) return '#ffffff'; // color means target node
             return '#3b82f6'; // color means unselected
           }}
           nodeRelSize={7}
-          linkColor={() => '#475569'}
+          linkColor={link => { 
+            if(activeLink) return '#ef4444';
+            return '#94a3b8';
+          }}
           linkWidth={link => (link.weight ? Math.sqrt(link.weight) : 1)}
           onNodeClick={(node) => {
             setActiveNode(node);
             if (fgRef.current) fgRef.current.centerAt(node.x, node.y, 600);
+          }}
+          onLinkClick={(link) => {
+            setActiveLink(link);
+            const sourceNode = graphData.nodes.find(n => n.id === (typeof link.source === 'object' ? link.source.id : link.source));
+            const targetNode = graphData.nodes.find(n => n.id === (typeof link.target === 'object' ? link.target.id : link.target));
+            if (sourceNode && targetNode) {
+              const midX = (sourceNode.x + targetNode.x) / 2;
+              const midY = (sourceNode.y + targetNode.y) / 2;
+
+              // change source and target node colors
+              setSourceNode(sourceNode);
+              setTargetNode(targetNode);
+
+              if (fgRef.current) fgRef.current.centerAt(midX, midY, 600);
+            }
           }}
         />
       </main>

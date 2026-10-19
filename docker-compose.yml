@@ -10,5 +10,15 @@ services:
     volumes:
       - arangodb_data:/var/lib/arangodb3
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-local
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   arangodb_data:
+  ollama_data:
