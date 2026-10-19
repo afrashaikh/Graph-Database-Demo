@@ -12,7 +12,7 @@ export default function App() {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [activeNode, setActiveNode] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [backend, setBackend] = useState("neo4j");
+  const [backend, setBackend] = useState("arango");
   const [status, setStatus] = useState('Loading graph...');
 
   // vector embedding state
@@ -24,10 +24,15 @@ export default function App() {
   const [newBody, setNewBody] = useState('');
   const [linkTargetId, setLinkTargetId] = useState('');
 
+  // add new note link state
+  const [linkType, setLinkType] = useState('RELATES_TO');
+  const [linkDescription, setLinkDescription] = useState('');
+
   // existing node add link state
   const [linkSourceNodeId, setLinkSourceNodeId] = useState('');
   const [linkTargetNodeId, setLinkTargetNodeId] = useState('');
   const [linkWeight, setLinkWeight] = useState(3);
+  
 
   // pulls graph topology and embeds nodes depending on active backend
   const fetchGraph = async () => {
@@ -78,11 +83,19 @@ export default function App() {
     try {
       setStatus('Creating node...');
       
+      // Generate embedding vector so ArangoDB can store and query it
+      let embedding = null;
+      try {
+        embedding = await embedText(`${newTitle}: ${newBody}`);
+      } catch (embErr) {
+        console.warn('Embedding calculation failed:', embErr);
+      }
+
       const noteUrl = backend === 'arango' ? '/api/arango/notes' : '/api/notes';
       const res = await fetch(noteUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: newTitle, body: newBody }),
+        body: JSON.stringify({ title: newTitle, body: newBody, embedding }),
       });
       const created = await res.json();
 
@@ -123,6 +136,8 @@ export default function App() {
           from: linkSourceNodeId,
           to: linkTargetNodeId,
           weight: Number(linkWeight) || 3,
+          type: linkType || 'RELATES_TO',
+          description: linkDescription || ''
         }),
       });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
@@ -142,31 +157,56 @@ export default function App() {
     const query = searchQuery.trim();
     if (!query) return;
 
-    if (Object.keys(embeddings).length === 0) {
-      setStatus('Embeddings still generating, please wait...');
-      return;
-    }
-
     try {
       setStatus(`Searching for "${query}"...`);
       const queryVec = await embedText(query);
 
-      // rank nodes by similarity
-      const scored = graphData.nodes.map(n => ({
-        ...n,
-        similarity: cosineSimilarity(queryVec, embeddings[n.id] || [])
-      }));
+      let scored = [];
 
-      scored.sort((a, b) => b.similarity - a.similarity);
+      if (backend === 'arango') {
+        // --- ARANGODB: Hybrid Search (Vector + Lexical + Centrality) ---
+        const res = await fetch('/api/arango/semantic-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, queryVec }),
+        });
+        if (!res.ok) throw new Error(`Search failed: ${res.statusText}`);
+        const hits = await res.json();
+
+        // Preserve canvas coordinates (x, y) so ForceGraph zoom & highlight work
+        scored = hits.map(hit => {
+          const matchedGraphNode = graphData.nodes.find(n => n.id === hit.id);
+          return {
+            ...hit,
+            x: matchedGraphNode?.x,
+            y: matchedGraphNode?.y,
+          };
+        });
+      } else {
+        // --- NEO4J FALLBACK: Client-side cosine similarity ---
+        if (Object.keys(embeddings).length === 0) {
+          setStatus('Embeddings still generating, please wait...');
+          return;
+        }
+
+        scored = graphData.nodes.map(n => ({
+          ...n,
+          similarity: cosineSimilarity(queryVec, embeddings[n.id] || [])
+        }));
+        scored.sort((a, b) => b.similarity - a.similarity);
+      }
+
       setRankedResults(scored);
 
       const best = scored[0];
       if (best && best.similarity > 0.15) {
         setActiveNode(best);
-        setStatus(`Best match: "${best.title}" (${(best.similarity * 100).toFixed(1)}%)`);
+        setStatus(
+          `Best match (${backend === 'arango' ? 'Hybrid' : 'Cosine'}): "${best.title}" (${(best.similarity * 100).toFixed(1)}%)`
+        );
 
-        // put screen on matched node
-        if (fgRef.current && best.x !== undefined) {
+        // Pan and center camera on best match
+        if (fgRef.current && best.x !== undefined && best.y !== undefined) {
           fgRef.current.centerAt(best.x, best.y, 800);
           fgRef.current.zoom(2.5, 800);
         }
@@ -340,6 +380,21 @@ export default function App() {
               onChange={(e) => setLinkWeight(e.target.value)}
             />
           </div>
+
+          <input
+            type="text"
+            className="input-field"
+            placeholder="Relation (e.g., IMPLEMENTS, DEPENDS_ON)"
+            value={linkType}
+            onChange={(e) => setLinkType(e.target.value)}
+          />
+          <input
+            type="text"
+            className="input-field"
+            placeholder="Relationship context / description..."
+            value={linkDescription}
+            onChange={(e) => setLinkDescription(e.target.value)}
+          />
 
           <button type="submit" className="btn btn-primary">Connect Nodes</button>
         </form>

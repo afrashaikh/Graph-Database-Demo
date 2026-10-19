@@ -41,22 +41,34 @@ const app = express();
 app.use(cors(), express.json());
 
 const run = async (query, params = {}) => {
-  const session = driver.session({ database: process.env.NEO4J_DATABASE }); //then creates a new session in the database for each query
-  try { return (await session.run(query, params)).records; }
-  finally { await session.close(); }
+  try {
+    const session = driver.session({ database: process.env.NEO4J_DATABASE });
+    try {
+      return (await session.run(query, params)).records;
+    } finally {
+      await session.close();
+    }
+  } catch (err) {
+    console.error('Neo4j Query Error:', err.message);
+    throw err;
+  }
 };
 const num = v => (neo4j.isInt(v) ? v.toNumber() : v);
 
 //all notes and links 
 app.get('/api/graph', async (_, res) => {
-  const n = await run(`MATCH (n:Note)
-    RETURN n.id AS id, n.title AS title, n.body AS body, COUNT { (n)--() } AS degree`);
-  const l = await run(`MATCH (a:Note)-[r:LINKS_TO]->(b:Note)
-    RETURN a.id AS source, b.id AS target, r.weight AS weight`);
-  res.json({
-    nodes: n.map(r => ({ id: r.get('id'), title: r.get('title'), body: r.get('body'), degree: num(r.get('degree')) })),
-    links: l.map(r => ({ source: r.get('source'), target: r.get('target'), weight: num(r.get('weight')) })),
-  });
+  try {
+    const n = await run(`MATCH (n:Note)
+      RETURN n.id AS id, n.title AS title, n.body AS body, COUNT { (n)--() } AS degree`);
+    const l = await run(`MATCH (a:Note)-[r:LINKS_TO]->(b:Note)
+      RETURN a.id AS source, b.id AS target, r.weight AS weight`);
+    res.json({
+      nodes: n.map(r => ({ id: r.get('id'), title: r.get('title'), body: r.get('body'), degree: num(r.get('degree')) })),
+      links: l.map(r => ({ source: r.get('source'), target: r.get('target'), weight: num(r.get('weight')) })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Neo4j unavailable: ${err.message}` });
+  }
 });
 
 //creates a note
@@ -110,6 +122,58 @@ app.get('/api/search', async (req, res) => {
   });
 });
 
+app.post('/api/arango/semantic-search', async (req, res) => {
+  const { query = '', queryVec = [] } = req.body;
+  try {
+    const cursor = await arangoDb.query(aql`
+      LET queryVec = ${queryVec}
+      LET queryText = LOWER(${query})
+      LET qLen = LENGTH(queryVec)
+
+      FOR doc IN notes
+        // In-line Cosine Similarity calculation
+        LET hasEmbedding = IS_ARRAY(doc.embedding) AND LENGTH(doc.embedding) == qLen AND qLen > 0
+        LET dotProduct = hasEmbedding ? SUM(FOR i IN 0..(qLen - 1) RETURN doc.embedding[i] * queryVec[i]) : 0
+        LET magDoc = hasEmbedding ? SQRT(SUM(FOR i IN 0..(qLen - 1) RETURN doc.embedding[i] * doc.embedding[i])) : 0
+        LET magQuery = hasEmbedding ? SQRT(SUM(FOR i IN 0..(qLen - 1) RETURN queryVec[i] * queryVec[i])) : 0
+        
+        LET rawCosine = (hasEmbedding AND magDoc > 0 AND magQuery > 0)
+          ? (dotProduct / (magDoc * magQuery))
+          : 0
+        LET vectorScore = (rawCosine + 1) / 2
+
+        // Lexical Substring Precision
+        LET titleMatch = CONTAINS(LOWER(doc.title), queryText) ? 1.0 : 0.0
+        LET bodyMatch = CONTAINS(LOWER(doc.body || ''), queryText) ? 0.5 : 0.0
+        LET lexicalScore = MAX([titleMatch, bodyMatch])
+
+        // Graph Degree Centrality
+        LET degree = LENGTH(FOR v IN 1..1 ANY doc links RETURN 1)
+        LET degreeBoost = LOG(1 + degree) * 0.05
+
+        // Combined Ranking Score
+        LET finalScore = (vectorScore * 0.65) + (lexicalScore * 0.25) + degreeBoost
+
+        SORT finalScore DESC
+        LIMIT 10
+        RETURN {
+          id: doc._key,
+          title: doc.title,
+          body: doc.body,
+          degree: degree,
+          similarity: finalScore,
+          vectorScore: vectorScore,
+          lexicalScore: lexicalScore
+        }
+    `);
+    const results = await cursor.all();
+    res.json(results);
+  } catch (err) {
+    console.error('Semantic Search Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 //loads sample data once
 //POST /api/seed
 //test
@@ -140,7 +204,13 @@ app.get('/api/arango/graph', async (_, res) => {
     `);
     const linksCursor = await arangoDb.query(aql`
       FOR l IN links
-        RETURN { source: PARSE_IDENTIFIER(l._from).key, target: PARSE_IDENTIFIER(l._to).key, weight: l.weight }
+        RETURN { 
+          source: PARSE_IDENTIFIER(l._from).key, 
+          target: PARSE_IDENTIFIER(l._to).key, 
+          weight: l.weight,
+          type: l.type || 'RELATES_TO',
+          description: l.description || ''
+        }
     `);
     const [nodes, links] = await Promise.all([nodesCursor.all(), linksCursor.all()]);
     res.json({ nodes, links });
@@ -151,10 +221,11 @@ app.get('/api/arango/graph', async (_, res) => {
 
 // create note
 app.post('/api/arango/notes', async (req, res) => {
-  const { title, body = '' } = req.body;
+  const { title, body = '', embedding = null } = req.body;
   const id = randomUUID();
   try {
-    await arangoDb.collection('notes').save({ _key: id, title, body });
+    // Save note including its vector array (if provided)
+    await arangoDb.collection('notes').save({ _key: id, title, body, embedding });
     res.json({ id, title, body });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -163,7 +234,7 @@ app.post('/api/arango/notes', async (req, res) => {
 
 // note linking
 app.post('/api/arango/links', async (req, res) => {
-  const { from, to, weight = 3 } = req.body;
+  const { from, to, weight = 3, type = 'RELATES_TO', description = '' } = req.body;
   try {
     const edgeColl = arangoDb.collection('links');
     const existing = await arangoDb.query(aql`
@@ -173,14 +244,23 @@ app.post('/api/arango/links', async (req, res) => {
         RETURN l
     `);
     const match = await existing.next();
+    
+    const edgeData = {
+      _from: `notes/${from}`,
+      _to: `notes/${to}`,
+      weight: Number(weight) || 3,
+      type: type.trim().toUpperCase(),
+      description: description.trim(),
+    };
+
     if (match) {
-      await edgeColl.update(match._key, { weight });
-    } else {
-      await edgeColl.save({
-        _from: `notes/${from}`,
-        _to: `notes/${to}`,
-        weight: Number(weight),
+      await edgeColl.update(match._key, {
+        weight: edgeData.weight,
+        type: edgeData.type,
+        description: edgeData.description,
       });
+    } else {
+      await edgeColl.save(edgeData);
     }
     res.json({ ok: true });
   } catch (err) {

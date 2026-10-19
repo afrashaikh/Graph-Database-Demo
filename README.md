@@ -3,7 +3,7 @@ Express + Neo4j API with React graph frontend.
 
 ## Prerequisites
 - Node.js (v18+)
-- Running Neo4j instance
+- Docker & Docker Compose
 
 ## Project Structure
 - `/` - Express backend API
@@ -11,9 +11,20 @@ Express + Neo4j API with React graph frontend.
 
 ## Setup & Running
 
+### Database Setup
+Start the local ArangoDB container: 
+``` 
+bash 
+docker compose up -d
+```
+
+Web UI: Visit `http://localhost:8529`
+Default User: root 
+Password: Defined in docker-compose.yml
+
 ### Backend Setup
 1. Go to terminal and type `npm install`
-2. Copy .env.example to .env and fill in your Neo4j info
+2. Copy .env.example to .env and configure it
 3. Type `npm start`
 4. Load in the sample data once in another terminal: `curl -X POST http://localhost:3000/api/seed`
 
