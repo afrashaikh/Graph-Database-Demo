@@ -317,6 +317,35 @@ export default function App() {
           <button type="submit" className="btn btn-primary">Semantic Search</button>
         </form>
 
+        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <button 
+            type="button" 
+            onClick={handleGraphRagSearch} 
+            className="btn btn-success" 
+            style={{ flex: 1 }}
+          >
+            GraphRAG Search
+          </button>
+        </div>
+
+        {/* GraphRAG answer */}
+        {graphRagAnswer && (
+          <div style={{
+            marginTop: '12px',
+            padding: '10px',
+            backgroundColor: '#0f172a',
+            borderRadius: '6px',
+            border: '1px solid #10b981'
+          }}>
+            <span style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 600 }}>
+              Answer:
+            </span>
+            <p style={{ fontSize: '0.85rem', color: '#f8fafc', marginTop: '6px', lineHeight: 1.4 }}>
+              {graphRagAnswer}
+            </p>
+          </div>
+        )}
+
         {/* refresh */}
         <button onClick={fetchGraph} className="btn btn-secondary">Refresh Graph</button>
 
@@ -349,36 +378,6 @@ export default function App() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-          <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Semantic Search</button>
-          <button 
-            type="button" 
-            onClick={handleGraphRagSearch} 
-            className="btn btn-success" 
-            style={{ flex: 1 }}
-          >
-            GraphRAG Search
-          </button>
-        </div>
-
-        {/* App.jsx */}
-        {graphRagAnswer && (
-          <div style={{
-            marginTop: '12px',
-            padding: '10px',
-            backgroundColor: '#0f172a',
-            borderRadius: '6px',
-            border: '1px solid #10b981'
-          }}>
-            <span style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 600 }}>
-              Answer:
-            </span>
-            <p style={{ fontSize: '0.85rem', color: '#f8fafc', marginTop: '6px', lineHeight: 1.4 }}>
-              {graphRagAnswer}
-            </p>
-          </div>
-        )}
-
         <hr className="divider" />
 
         {/* add/link form */}
@@ -400,16 +399,6 @@ export default function App() {
             rows={2}
           />
           {/* populates dropdown w/ existing nodes */}
-          <select
-            className="input-field"
-            value={linkTargetId}
-            onChange={(e) => setLinkTargetId(e.target.value)}
-          >
-            <option value="">Link to existing note (optional)...</option>
-            {graphData.nodes.map(n => (
-              <option key={n.id} value={n.id}>{n.title}</option>
-            ))}
-          </select>
           <button type="submit" className="btn btn-success">+ Create Note</button>
         </form>
 

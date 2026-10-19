@@ -428,7 +428,7 @@ app.post('/api/arango/graphrag', async (req, res) => {
       ].join('\n');
     }).join('\n\n---\n\n');
 
-    const prompt = `You are a helpful knowledge graph assistant. Use ONLY the provided Graph Context to answer the question concisely and accurately in a succint manner. You do not need to explain the process of finding the answer. If the context does not contain the answer, say "I don't have enough information."
+    const prompt = `You are a helpful knowledge graph assistant. Use ONLY the provided Graph Context to answer the question concisely and accurately in a succint manner. You do not need to explain the process of finding the answer. If the context does not contain the answer or you are unsure, say "I don't have enough information." Always write in human sentences. Do not explain the graph context or the reasoning process unless asked why. If multiple answers exist, include a reasonable amount of them as long as it is accurate. If the answer is not in the context, do not hallucinate.
 
     Graph Context:
     ${contextAssembly}
