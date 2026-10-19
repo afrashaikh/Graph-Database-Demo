@@ -33,6 +33,9 @@ export default function App() {
   const [linkTargetNodeId, setLinkTargetNodeId] = useState('');
   const [linkWeight, setLinkWeight] = useState(3);
   
+  // GraphRAG resutls
+  const [graphRagContext, setGraphRagContext] = useState('');
+  const [graphRagAnchors, setGraphRagAnchors] = useState([]);
 
   // pulls graph topology and embeds nodes depending on active backend
   const fetchGraph = async () => {
@@ -164,7 +167,7 @@ export default function App() {
       let scored = [];
 
       if (backend === 'arango') {
-        // --- ARANGODB: Hybrid Search (Vector + Lexical + Centrality) ---
+        // ARANGODB: Hybrid Search (Vector + Lexical + Centrality)
         const res = await fetch('/api/arango/semantic-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -173,7 +176,7 @@ export default function App() {
         if (!res.ok) throw new Error(`Search failed: ${res.statusText}`);
         const hits = await res.json();
 
-        // Preserve canvas coordinates (x, y) so ForceGraph zoom & highlight work
+        // preserve canvas coordinates (x, y) so ForceGraph zoom & highlight work
         scored = hits.map(hit => {
           const matchedGraphNode = graphData.nodes.find(n => n.id === hit.id);
           return {
@@ -183,7 +186,7 @@ export default function App() {
           };
         });
       } else {
-        // --- NEO4J FALLBACK: Client-side cosine similarity ---
+        //  NEO4J: Client-side cosine similarity 
         if (Object.keys(embeddings).length === 0) {
           setStatus('Embeddings still generating, please wait...');
           return;
@@ -205,7 +208,7 @@ export default function App() {
           `Best match (${backend === 'arango' ? 'Hybrid' : 'Cosine'}): "${best.title}" (${(best.similarity * 100).toFixed(1)}%)`
         );
 
-        // Pan and center camera on best match
+        // pan and center camera on best match
         if (fgRef.current && best.x !== undefined && best.y !== undefined) {
           fgRef.current.centerAt(best.x, best.y, 800);
           fgRef.current.zoom(2.5, 800);
@@ -216,6 +219,43 @@ export default function App() {
       }
     } catch (err) {
       setStatus(`Search failed: ${err.message}`);
+    }
+  };
+
+  // HYBRID GRAPHRAG
+  const handleGraphRagSearch = async (e) => {
+    e.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
+
+    try {
+      setStatus(`Executing Hybrid GraphRAG for "${query}"...`);
+      const queryVec = await embedText(query);
+
+      const res = await fetch('/api/arango/graphrag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, queryVec, maxAnchors: 2, maxHops: 1 }),
+      });
+
+      if (!res.ok) throw new Error(`GraphRAG failed: ${res.statusText}`);
+      const data = await res.json();
+
+      setGraphRagAnchors(data.anchors);
+      setGraphRagContext(data.formattedContext);
+
+      // focus graph camera on the primary anchor node
+      if (data.anchors.length > 0) {
+        const topAnchor = graphData.nodes.find(n => n.id === data.anchors[0].anchorId);
+        if (topAnchor && fgRef.current) {
+          setActiveNode(topAnchor);
+          fgRef.current.centerAt(topAnchor.x, topAnchor.y, 800);
+          fgRef.current.zoom(2.5, 800);
+        }
+      }
+      setStatus(`GraphRAG retrieved ${data.anchors.length} anchor context clusters.`);
+    } catch (err) {
+      setStatus(`GraphRAG error: ${err.message}`);
     }
   };
 
@@ -238,6 +278,9 @@ export default function App() {
 
     return set;
   }, [activeNode, graphData.links]);
+
+
+  // RENDERING
 
   return (
     <div className="app-container">
@@ -300,6 +343,49 @@ export default function App() {
                 <span style={{ color: '#38bdf8' }}>{(hit.similarity * 100).toFixed(0)}%</span>
               </div>
             ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Semantic Search</button>
+          <button 
+            type="button" 
+            onClick={handleGraphRagSearch} 
+            className="btn btn-success" 
+            style={{ flex: 1 }}
+          >
+            GraphRAG Search
+          </button>
+        </div>
+
+        {/* GraphRAG LLM Context Card */}
+        {graphRagContext && (
+          <div style={{
+            marginTop: '12px',
+            padding: '10px',
+            backgroundColor: '#0f172a',
+            borderRadius: '6px',
+            border: '1px solid #38bdf8'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600 }}>RAG AUGMENTED CONTEXT:</span>
+              <button 
+                onClick={() => navigator.clipboard.writeText(graphRagContext)}
+                style={{ fontSize: '0.7rem', padding: '2px 6px', cursor: 'pointer' }}
+              >
+                Copy
+              </button>
+            </div>
+            <pre style={{
+              fontSize: '0.75rem',
+              color: '#cbd5e1',
+              whiteSpace: 'pre-wrap',
+              maxHeight: '160px',
+              overflowY: 'auto',
+              marginTop: '6px'
+            }}>
+              {graphRagContext}
+            </pre>
           </div>
         )}
 
