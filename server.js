@@ -371,7 +371,7 @@ app.post('/api/arango/graphrag', async (req, res) => {
           LET degree = LENGTH(FOR v IN 1..1 ANY doc links RETURN 1)
           LET degreeBoost = LOG(1 + degree) * 0.05
 
-          LET hybridScore = (vectorScore * 0.65) + (lexicalScore * 0.25) + degreeBoost
+          LET hybridScore = (vectorScore * 0.75) + (lexicalScore * 0.15) + degreeBoost
 
           SORT hybridScore DESC
           LIMIT ${maxAnchors}
