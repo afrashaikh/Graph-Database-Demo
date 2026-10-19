@@ -371,42 +371,11 @@ export default function App() {
             border: '1px solid #10b981'
           }}>
             <span style={{ fontSize: '0.8rem', color: '#10b981', fontWeight: 600 }}>
-              AI SYNTHESIZED ANSWER:
+              Answer:
             </span>
             <p style={{ fontSize: '0.85rem', color: '#f8fafc', marginTop: '6px', lineHeight: 1.4 }}>
               {graphRagAnswer}
             </p>
-          </div>
-        )}
-
-        {/* GraphRAG LLM Context Card */}
-        {graphRagContext && (
-          <div style={{
-            marginTop: '12px',
-            padding: '10px',
-            backgroundColor: '#0f172a',
-            borderRadius: '6px',
-            border: '1px solid #38bdf8'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', color: '#38bdf8', fontWeight: 600 }}>RAG AUGMENTED CONTEXT:</span>
-              <button 
-                onClick={() => navigator.clipboard.writeText(graphRagContext)}
-                style={{ fontSize: '0.7rem', padding: '2px 6px', cursor: 'pointer' }}
-              >
-                Copy
-              </button>
-            </div>
-            <pre style={{
-              fontSize: '0.75rem',
-              color: '#cbd5e1',
-              whiteSpace: 'pre-wrap',
-              maxHeight: '160px',
-              overflowY: 'auto',
-              marginTop: '6px'
-            }}>
-              {graphRagContext}
-            </pre>
           </div>
         )}
 
