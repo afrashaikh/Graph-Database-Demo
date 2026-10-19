@@ -12,7 +12,7 @@ export default function App() {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [activeNode, setActiveNode] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [backend, setBackend] = useState("neo4j");
+  const [backend, setBackend] = useState("arango");
   const [status, setStatus] = useState('Loading graph...');
 
   // vector embedding state
