@@ -11,6 +11,9 @@ export default function App() {
   // graph state
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [activeNode, setActiveNode] = useState(null);
+  const [sourceNode, setSourceNode] = useState(null);
+  const [targetNode, setTargetNode] = useState(null);
+  const [activeLink, setActiveLink] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [backend, setBackend] = useState("arango");
   const [status, setStatus] = useState('Loading graph...');
@@ -473,8 +476,25 @@ export default function App() {
             <p className="node-card-body">{activeNode.body || 'No description provided.'}</p>
             <div className="node-card-meta">Connected Links: {activeNode.degree}</div>
           </div>
-        )}
+        )} 
+
+        {/* details selected link */}
+        {activeLink && (
+          <div className="link-card"> 
+          {activeLink && ( 
+            <div className="link-card-content"> 
+              <h4 className="link-card-title">Link Details</h4>
+              <p className="link-card-body">Type: {activeLink.type || 'RELATES_TO'}</p>
+              <p className="link-card-body">Weight: {activeLink.weight || 3}</p>
+              <p className="link-card-body">Description: {activeLink.description || 'No description provided.'}</p>
+            </div>
+          )}
+          </div>
+          )}  
+
       </aside>
+
+
 
       {/* canvas */}
       <main className="canvas-container">
@@ -482,19 +502,40 @@ export default function App() {
           ref={fgRef}
           graphData={graphData}
           nodeId="id"
+          LinkId="id"
           // displays tooltip upon node hover
           nodeLabel={node => `${node.title} (${node.degree} links)`}
           nodeColor={node => {
             if (activeNode?.id === node.id) return '#ef4444'; // color means selected
             if (neighborIds.has(node.id)) return '#f59e0b'; // color means neighbor
+            if (sourceNode?.id === node.id) return '#000000'; // color means source node
+            if (targetNode?.id === node.id) return '#ffffff'; // color means target node
             return '#3b82f6'; // color means unselected
           }}
           nodeRelSize={7}
-          linkColor={() => '#475569'}
+          linkColor={link => { 
+            if(activeLink) return '#ef4444';
+            return '#94a3b8';
+          }}
           linkWidth={link => (link.weight ? Math.sqrt(link.weight) : 1)}
           onNodeClick={(node) => {
             setActiveNode(node);
             if (fgRef.current) fgRef.current.centerAt(node.x, node.y, 600);
+          }}
+          onLinkClick={(link) => {
+            setActiveLink(link);
+            const sourceNode = graphData.nodes.find(n => n.id === (typeof link.source === 'object' ? link.source.id : link.source));
+            const targetNode = graphData.nodes.find(n => n.id === (typeof link.target === 'object' ? link.target.id : link.target));
+            if (sourceNode && targetNode) {
+              const midX = (sourceNode.x + targetNode.x) / 2;
+              const midY = (sourceNode.y + targetNode.y) / 2;
+
+              // change source and target node colors
+              setSourceNode(sourceNode);
+              setTargetNode(targetNode);
+
+              if (fgRef.current) fgRef.current.centerAt(midX, midY, 600);
+            }
           }}
         />
       </main>
