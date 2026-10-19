@@ -338,6 +338,106 @@ app.get('/api/arango/search', async (req, res) => {
   }
 });
 
+// HYBRID GRAPHRAG!!!!
+// executes hybrid search (Vector + Lexical) -> subgraph expansion (Edges & Neighbors)
+app.post('/api/arango/graphrag', async (req, res) => {
+  const { query = '', queryVec = [], maxAnchors = 2, maxHops = 1 } = req.body;
+
+  try {
+    const cursor = await arangoDb.query(aql`
+      LET queryVec = ${queryVec}
+      LET queryText = LOWER(${query})
+      LET qLen = LENGTH(queryVec)
+
+      // Hybrid Retrieval to find top anchor nodes
+      LET scoredAnchors = (
+        FOR doc IN notes
+          // Vector Cosine Similarity
+          LET hasEmbedding = IS_ARRAY(doc.embedding) AND LENGTH(doc.embedding) == qLen AND qLen > 0
+          LET dotProduct = hasEmbedding ? SUM(FOR i IN 0..(qLen - 1) RETURN doc.embedding[i] * queryVec[i]) : 0
+          LET magDoc = hasEmbedding ? SQRT(SUM(FOR i IN 0..(qLen - 1) RETURN doc.embedding[i] * doc.embedding[i])) : 0
+          LET magQuery = hasEmbedding ? SQRT(SUM(FOR i IN 0..(qLen - 1) RETURN queryVec[i] * queryVec[i])) : 0
+          LET rawCosine = (hasEmbedding AND magDoc > 0 AND magQuery > 0)
+            ? (dotProduct / (magDoc * magQuery))
+            : 0
+          LET vectorScore = (rawCosine + 1) / 2
+
+          // Lexical Keyword Matching
+          LET titleMatch = CONTAINS(LOWER(doc.title), queryText) ? 1.0 : 0.0
+          LET bodyMatch = CONTAINS(LOWER(doc.body || ''), queryText) ? 0.5 : 0.0
+          LET lexicalScore = MAX([titleMatch, bodyMatch])
+
+          // Centrality Authority Boost
+          LET degree = LENGTH(FOR v IN 1..1 ANY doc links RETURN 1)
+          LET degreeBoost = LOG(1 + degree) * 0.05
+
+          LET hybridScore = (vectorScore * 0.65) + (lexicalScore * 0.25) + degreeBoost
+
+          SORT hybridScore DESC
+          LIMIT ${maxAnchors}
+          RETURN {
+            node: doc,
+            hybridScore: hybridScore,
+            vectorScore: vectorScore,
+            lexicalScore: lexicalScore
+          }
+      )
+
+      // Knowledge Graph Subgraph Expansion
+      LET expandedContext = (
+        FOR anchor IN scoredAnchors
+          LET startNode = anchor.node
+          LET neighbors = (
+            FOR v, e IN 1..${maxHops} ANY startNode links
+              RETURN {
+                targetId: v._key,
+                targetTitle: v.title,
+                targetBody: v.body,
+                relationType: e.type || 'RELATES_TO',
+                relationDescription: e.description || '',
+                weight: e.weight || 1
+              }
+          )
+          RETURN {
+            anchorId: startNode._key,
+            anchorTitle: startNode.title,
+            anchorBody: startNode.body,
+            scores: {
+              hybrid: anchor.hybridScore,
+              vector: anchor.vectorScore,
+              lexical: anchor.lexicalScore
+            },
+            relationships: neighbors
+          }
+      )
+
+      RETURN expandedContext
+    `);
+
+    const contextData = await cursor.next();
+
+    // format into LLM-ready context assembly
+    const contextAssembly = (contextData || []).map((entry, idx) => {
+      const relLines = entry.relationships.map(
+        r => `   ↳ [${r.relationType}] -> "${r.targetTitle}" (${r.relationDescription || 'Connected note'})`
+      );
+      return [
+        `[Document ${idx + 1}] Title: ${entry.anchorTitle}`,
+        `Content: ${entry.anchorBody}`,
+        relLines.length > 0 ? `Graph Relationships:\n${relLines.join('\n')}` : `Graph Relationships: None`,
+      ].join('\n');
+    }).join('\n\n---\n\n');
+
+    res.json({
+      anchors: contextData,
+      formattedContext: contextAssembly
+    });
+  } catch (err) {
+    console.error('GraphRAG Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // seed arangoDB
 app.post('/api/arango/seed', async (_, res) => {
   try {
