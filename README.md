@@ -12,15 +12,15 @@ Express + Neo4j API with React graph frontend.
 ## Setup & Running
 
 ### Database Setup
-Start the local ArangoDB container: 
+- Start the local ArangoDB container: 
 ``` 
 bash 
 docker compose up -d
 ```
 
-Web UI: Visit `http://localhost:8529`
-Default User: root 
-Password: Defined in docker-compose.yml
+- Web UI: Visit `http://localhost:8529`
+- Default User: root 
+- Password: Defined in docker-compose.yml
 
 ### Backend Setup
 1. Go to terminal and type `npm install`
