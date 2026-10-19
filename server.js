@@ -57,14 +57,18 @@ const num = v => (neo4j.isInt(v) ? v.toNumber() : v);
 
 //all notes and links 
 app.get('/api/graph', async (_, res) => {
-  const n = await run(`MATCH (n:Note)
-    RETURN n.id AS id, n.title AS title, n.body AS body, COUNT { (n)--() } AS degree`);
-  const l = await run(`MATCH (a:Note)-[r:LINKS_TO]->(b:Note)
-    RETURN a.id AS source, b.id AS target, r.weight AS weight`);
-  res.json({
-    nodes: n.map(r => ({ id: r.get('id'), title: r.get('title'), body: r.get('body'), degree: num(r.get('degree')) })),
-    links: l.map(r => ({ source: r.get('source'), target: r.get('target'), weight: num(r.get('weight')) })),
-  });
+  try {
+    const n = await run(`MATCH (n:Note)
+      RETURN n.id AS id, n.title AS title, n.body AS body, COUNT { (n)--() } AS degree`);
+    const l = await run(`MATCH (a:Note)-[r:LINKS_TO]->(b:Note)
+      RETURN a.id AS source, b.id AS target, r.weight AS weight`);
+    res.json({
+      nodes: n.map(r => ({ id: r.get('id'), title: r.get('title'), body: r.get('body'), degree: num(r.get('degree')) })),
+      links: l.map(r => ({ source: r.get('source'), target: r.get('target'), weight: num(r.get('weight')) })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Neo4j unavailable: ${err.message}` });
+  }
 });
 
 //creates a note
