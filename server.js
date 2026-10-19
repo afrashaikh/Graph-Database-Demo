@@ -428,7 +428,40 @@ app.post('/api/arango/graphrag', async (req, res) => {
       ].join('\n');
     }).join('\n\n---\n\n');
 
+    const prompt = `You are a helpful knowledge graph assistant. Use ONLY the provided Graph Context to answer the question concisely and accurately. If the context does not contain the answer, say "I don't have enough information."
+
+    Graph Context:
+    ${contextAssembly}
+
+    Question: ${query}
+    Answer:`;
+
+    let generatedAnswer = '';
+
+    try {
+      const ollamaRes = await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3.2:1b',
+          prompt: prompt,
+          stream: false,
+        }),
+      });
+
+      if (ollamaRes.ok) {
+        const ollamaData = await ollamaRes.json();
+        generatedAnswer = ollamaData.response.trim();
+      } else {
+        generatedAnswer = 'Failed to generate answer from local LLM.';
+      }
+    } catch (llmErr) {
+      console.warn('Ollama unreachable, returning raw context instead:', llmErr.message);
+      generatedAnswer = 'Local LLM offline. Run Ollama on port 11434 to enable text generation.';
+    }
+
     res.json({
+      answer: generatedAnswer || 'No answer generated yet.',
       anchors: contextData,
       formattedContext: contextAssembly
     });
