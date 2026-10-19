@@ -110,6 +110,51 @@ app.get('/api/search', async (req, res) => {
   });
 });
 
+app.post('/api/arango/semantic-search', async (req, res) => {
+  const { query = '', queryVec = [] } = req.body;
+  try {
+    const cursor = await arangoDb.query(aql`
+      LET queryVec = ${queryVec}
+      LET queryText = LOWER(${query})
+
+      FOR doc IN notes
+        // 1. Vector Cosine Similarity (normalized 0 to 1)
+        LET rawCosine = (IS_ARRAY(doc.embedding) AND LENGTH(doc.embedding) == LENGTH(queryVec))
+          ? COSINE(doc.embedding, queryVec)
+          : 0
+        LET vectorScore = (rawCosine + 1) / 2
+
+        // 2. Lexical Substring Precision (exact match boost)
+        LET titleMatch = CONTAINS(LOWER(doc.title), queryText) ? 1.0 : 0.0
+        LET bodyMatch = CONTAINS(LOWER(doc.body || ''), queryText) ? 0.5 : 0.0
+        LET lexicalScore = MAX([titleMatch, bodyMatch])
+
+        // 3. Graph Degree Centrality (higher connectivity gives relevance boost)
+        LET degree = LENGTH(FOR v IN 1..1 ANY doc links RETURN 1)
+        LET degreeBoost = LOG(1 + degree) * 0.05
+
+        // Combined Ranking Score: 65% Semantic + 25% Keyword + Degree Boost
+        LET finalScore = (vectorScore * 0.65) + (lexicalScore * 0.25) + degreeBoost
+
+        SORT finalScore DESC
+        LIMIT 10
+        RETURN {
+          id: doc._key,
+          title: doc.title,
+          body: doc.body,
+          degree: degree,
+          similarity: finalScore,
+          vectorScore: vectorScore,
+          lexicalScore: lexicalScore
+        }
+    `);
+    const results = await cursor.all();
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 //loads sample data once
 //POST /api/seed
 //test
@@ -151,10 +196,11 @@ app.get('/api/arango/graph', async (_, res) => {
 
 // create note
 app.post('/api/arango/notes', async (req, res) => {
-  const { title, body = '' } = req.body;
+  const { title, body = '', embedding = null } = req.body;
   const id = randomUUID();
   try {
-    await arangoDb.collection('notes').save({ _key: id, title, body });
+    // Save note including its vector array (if provided)
+    await arangoDb.collection('notes').save({ _key: id, title, body, embedding });
     res.json({ id, title, body });
   } catch (err) {
     res.status(500).json({ error: err.message });
